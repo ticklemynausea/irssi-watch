@@ -1,0 +1,39 @@
+dalnet ircd WATCH implementation for irssi
+supports PTnet's NickServ extras
+
+Uses some client code from the original watch script by ThEbUtChE
+http://scripts.irssi.org/scripts/watch.pl
+Credits: thebutche@interec.org / http://www.nebulosa.org
+
+author:  neofreak@irc.ptnet.org
+ email: igotbugs@ticklemynausea.net 
+   web: http://www.ticklemynausea.net
+
+
+                    ,,__
+          ..  ..   / o._)                   .---.
+         /--'/--\  \-'||        .----.    .'     '.
+        /        \_/ / |      .'      '..'         '-.
+      .'\  \__\  __.'.'     .'          ì-._
+        )\ |  )\ |      _.'
+       // \\ // \\
+      ||_  \\|_  \\
+      '--' '--'' '--'
+
+
+BASED ON: http://mirc.org/mishbox/reference/rawhelp6.htm
+PTnet RFC (lol): http://ptnet.org/noticias_ptnet_novidades-na-rede
+
+
+Usage:
+
+/watch          : shows online/offline nicknames
+/watch update   : updates the server with your online nicknames
+/watch status   : shows the status of your watch list
+/watch add nick : adds the nick to your watch list
+/watch del nick : removes the nick from your watch list
+/watch help     : shows thsi help screen
+
+You will want to execute the "/watch update" command automatically
+on connect.
+

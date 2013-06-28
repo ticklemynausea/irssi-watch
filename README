@@ -28,7 +28,7 @@ PTnet RFC (lol): http://ptnet.org/noticias_ptnet_novidades-na-rede
 Usage:
 
 /watch          : shows online/offline nicknames
-/watch update   : updates the server with your online nicknames
+/watch update   : updates the server with your watch list
 /watch status   : shows the status of your watch list
 /watch add nick : adds the nick to your watch list
 /watch del nick : removes the nick from your watch list

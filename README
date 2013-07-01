@@ -32,7 +32,7 @@ Usage:
 /watch status   : shows the status of your watch list
 /watch add nick : adds the nick to your watch list
 /watch del nick : removes the nick from your watch list
-/watch help     : shows thsi help screen
+/watch help     : shows this help screen
 
 You will want to execute the "/watch update" command automatically
 on connect.

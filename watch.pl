@@ -59,7 +59,7 @@ use POSIX qw(strftime);
 use Data::Dumper;
 
 our %watchlist = {};
-
+my $maxlength = 400;
 my $msg_lb = "%K[%n";
 my $msg_rb = "%K]%n";
 
@@ -90,9 +90,9 @@ sub irssi_output {
 
   if (is_connected()) {
     my $tag = $server->{tag};
-    Irssi::print "%K[%n$tag%K]%n @_", MSGLEVEL_CRAP
+    Irssi::print "%K[%n$tag%K]%n @_", MSGLEVEL_SNOTES
   } else {
-    Irssi::print "@_", MSGLEVEL_CRAP
+    Irssi::print "@_", MSGLEVEL_SNOTES
   }
 }
 
@@ -267,20 +267,35 @@ sub cmd_watch
 
 sub cmd_watch_load
 {
-  my($file) = Irssi::get_irssi_dir."/watch";
-  my($nick);
-  my $ret;
+  my $file = Irssi::get_irssi_dir."/watch";
+  my $nick;
+  my $leftovers;
+  my $command;
 
   local(*FILE);
   open FILE, "< $file";
+  
+  $command = "quote watch ";
   while (<FILE>) {
+
     @nick = split;
-    $ret .= "+@nick[0] ";
+    $command .= "+@nick[0] ";
+    $leftovers = 1;
+
+    if (length($command) > $maxlength) {
+      Irssi::active_win()->command($command);
+      $leftovers = 0;
+      $command = "quote watch ";
+    }
   }
+
+  if ($leftovers = 1) {
+    Irssi::active_win()->command($command);
+  }
+  
   close FILE;
   chop $ret;
 
-  Irssi::active_win()->command("quote watch $ret");
 }
 
 sub cmd_watch_help 
@@ -434,6 +449,8 @@ Irssi::signal_add('event 606', 'event_rpl_watchlist');
 Irssi::signal_add('event 607', 'event_rpl_endofwatchlist');
 
 Irssi::signal_add('event 608', 'event_rpl_watchnickserv'); # PTnet!
+
+Irssi::settings_add_str('watch', 'nicknames', '');
 
 
 #

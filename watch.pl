@@ -52,25 +52,31 @@ $VERSION = '3.0';
  bugs    => 'igotbugs@ticklemynausea.net'
 );
 
+use warnings;
+use strict;
+
 use Irssi;
 use Irssi::Irc;
 use POSIX qw(floor);
 use POSIX qw(strftime);
+use DateTime::Duration;
+use List::Util qw(max);
 use Data::Dumper;
 
-our %watchlist = {};
+my %watchlist;
+my @displaylist = ();
+my $use_table = 0;
 my $maxlength = 400;
 my $msg_lb = "%K[%n";
 my $msg_rb = "%K]%n";
-
-#
+my $watch = "Watch:";#
 # misc. functions
 #
 ################################################################################
 
 # Checks if we're in PTnet
 sub is_ptnet {
-  my $server = Irssi::active_server();
+  my $server = shift;
   my $version = $server->{version};
 
   # expected: dal4.6.Based.PTnet1.7.00
@@ -80,47 +86,102 @@ sub is_ptnet {
 # Checks if we're cconnected
 sub is_connected {
   my $server = Irssi::active_server();
-
-  return $server != null;
-}
-
-# Prints crap.
-sub irssi_output {
-  my $server = Irssi::active_server();
-
-  if (is_connected()) {
-    my $tag = $server->{tag};
-    Irssi::print "%K[%n$tag%K]%n @_", MSGLEVEL_SNOTES
-  } else {
-    Irssi::print "@_", MSGLEVEL_SNOTES
-  }
+  return defined $server;
 }
 
 # Checks if a nick is already saved in the watchlist file
 sub is_in_list
 {
   my ($ni) = @_;
-
-  my($file) = Irssi::get_irssi_dir."/watch";
-  my($nick);
+  
+  my $file = Irssi::get_irssi_dir."/watch";
+  my @nick;
+  
   local(*FILE);
   open FILE, "< $file";
   while (<FILE>) {
     @nick = split;
-  if (lc(@nick[0]) eq lc($ni)) { return 1; }
+  if (lc($nick[0]) eq lc($ni)) { return 1; }
   }
   close FILE;
   return 0;
 }
 
-# Pads a nickname with spaces.
+# Pads with spaces.
 sub LPad {
-  local($str, $len, $chr) = @_;
+  my ($str, $len, $chr) = @_;
+
   $chr = " " unless (defined($chr));
   return substr(($chr x $len) . $str, -1 * $len, $len);
 }
 
-#
+sub RPad {
+  my ($str, $len, $chr) = @_;
+  $chr = " " unless (defined($chr));
+  return substr($str . ($chr x $len), 0, $len);
+}
+
+sub draw_box {
+  my ($title, $text, $footer, $colour, $maxlen_nick, $maxlen_logontimef, $maxlen_regtimef, $maxlen_mask) = @_;
+
+  my $box = '';
+  my $h1 = RPad("%W%UNick%U%c", $maxlen_nick+8, "-");
+  my $h2 = RPad("%W%UOnline%U%c", $maxlen_logontimef+8, "-");
+  my $h3 = RPad("%W%URegistration%U%c", $maxlen_regtimef+8, "-");
+  my $h4 = RPad("%W%UMask%U%c", $maxlen_mask+8, "-");
+
+  $box .= "%c+-$h1-+-";
+  $box .= "$h2-+-";
+  $box .= "$h3-+-";
+  $box .= "$h4";
+  $box .= '-+%n'."\n";
+  foreach (split(/\n/, $text)) {
+      $box .= '%c|%n '.$_."\n";
+  }
+  $box .= "%c+"."-" x ($maxlen_nick+2) ."%n";
+  $box .= "%c+"."-" x ($maxlen_logontimef+2) ."%n";
+  $box .= "%c+"."-" x ($maxlen_regtimef+2) ."%n";
+  $box .= "%c+"."-" x ($maxlen_mask+2) ."+%n";
+  $box =~ s/%.//g unless $colour;
+  return $box;
+} ## end sub draw_box
+
+#sub to_period {
+#  my ($logontime) = @_;
+#  my $duration = time - $logontime;
+#  return "$duration"."s";
+#} ## end sub ToPeriod
+
+sub to_period {
+
+  my ($time) = @_; 
+  $time = time - $time;
+
+  if ($time < 0) {
+    $time = 0;
+  }
+
+  my $weeks = 
+  my $days = int($time / 86400); 
+  $time -= ($days * 86400); 
+  my $hours = int($time / 3600); 
+  $time -= ($hours * 3600); 
+  my $minutes = int($time / 60); 
+  my $seconds = $time % 60; 
+
+  $days = $days < 1 ? '' : $days .'d ';
+  $hours = $hours < 1 ? '' : $hours .'h '; 
+  $minutes = $minutes < 1 ? '' : $minutes . 'm ';
+
+  my $str = ($days . $hours . $minutes . $seconds . 's'); 
+  my $pos = index($str, " ");
+  $pos = index($str, " ", $pos+1);
+  if ($pos != -1) {
+    $str = substr($str, 0, $pos);
+  }
+  return $str;
+}
+
 # Client code: command handling, etc
 #
 ################################################################################
@@ -129,7 +190,10 @@ sub LPad {
 # Lists all nicknames saved in the watch list
 sub cmd_watch_list
 {
+  my @nick;
+  
   if (is_connected()) {
+    $use_table = 1;
     Irssi::active_win()->command("quote watch l");
   } else {
     my($file) = Irssi::get_irssi_dir."/watch";
@@ -141,19 +205,49 @@ sub cmd_watch_list
     open FILE, "< $file";
     while (<FILE>) {
       @nick = split;
-      $str .= " @nick[0]";
+      $str .= " $nick[0]";
       $c = $c + 1;
     }
 
     close FILE;
 
     if ($c > 0) {
-      irssi_output "Watching %_$c%n nicknames:$str";
+      Irssi::print "Watching %_$c%n nicknames:$str";
     } else {
-      irssi_output "Watch list is empty!";
+      Irssi::print "Watch list is empty!";
     }
   }
+}
 
+sub cmd_watch_table
+{
+  my @nick;
+
+  if (is_connected()) {
+    $use_table = 1;
+    Irssi::active_win()->command("quote watch l");
+  } else {
+    my($file) = Irssi::get_irssi_dir."/watch";
+    my($nick);
+    my $str = "";
+    my $c = 0;
+    local(*FILE);
+
+    open FILE, "< $file";
+    while (<FILE>) {
+      @nick = split;
+      $str .= " $nick[0]";
+      $c = $c + 1;
+    }
+
+    close FILE;
+
+    if ($c > 0) {
+      Irssi::print "Watching %_$c%n nicknames:$str";
+    } else {
+      Irssi::print "Watch list is empty!";
+    }
+  }
 }
 
 sub cmd_watch_status {
@@ -167,8 +261,8 @@ sub cmd_watch_add
   my ($nick) = @_;
   my($file) = Irssi::get_irssi_dir."/watch";
   local(*FILE);
-  if ($nick eq "") { irssi_output "Please choose a nickname."; return; 
-  } elsif (is_in_list($nick)) { irssi_output "The nickname is already on the watchlist."; return; }
+  if ($nick eq "") { Irssi::print "Please choose a nickname."; return; 
+  } elsif (is_in_list($nick)) { Irssi::print "The nickname is already on the watchlist."; return; }
 
   open FILE, ">> $file";
         print FILE join("\t","$nick\n");
@@ -177,7 +271,7 @@ sub cmd_watch_add
   if (is_connected) {
     Irssi::active_win()->command("quote watch +$nick");
   } else {
-    irssi_output "Nick %_$nick%n has been added to the.";
+    Irssi::print "Nick %_$nick%n has been added to the.";
   }
 }
 
@@ -186,16 +280,19 @@ sub cmd_watch_add
 sub cmd_watch_del
 {
   my ($ni) = @_;
-  my($file) = Irssi::get_irssi_dir."/watch";
-  my($file2) = Irssi::get_irssi_dir."/.watch-temp";
+
+  my @nick;
+  my $file = Irssi::get_irssi_dir."/watch";
+  my $file2 = Irssi::get_irssi_dir."/.watch-temp";
+
   local(*FILE);
   local(*FILE2);
   
   if ($ni eq "") { 
-    irssi_output "Please choose a nickname."; 
+    Irssi::print "Please choose a nickname."; 
     return;
   } elsif (!is_in_list($ni)) { 
-    irssi_output "The nickname isn't on the watchlist.";
+    Irssi::print "The nickname isn't on the watchlist.";
     return;
   }
 
@@ -208,9 +305,9 @@ sub cmd_watch_del
 
   while (<FILE>) {
     @nick = split;
-    if (lc(@nick[0]) eq lc($ni)) { 
+    if (lc($nick[0]) eq lc($ni)) { 
     } else {
-      print FILE2 join("\t","@nick[0]\n");
+      print FILE2 join("\t","$nick[0]\n");
     }
   }
 
@@ -226,7 +323,7 @@ sub cmd_watch_del
 
   while (<FILE2>) {
     @nick = split;
-    print FILE join("\t","@nick[0]\n");
+    print FILE join("\t","$nick[0]\n");
   }
 
   close FILE;
@@ -235,7 +332,7 @@ sub cmd_watch_del
   Irssi::active_win()->command("quote watch -$ni");
 
   if (!is_connected()) {
-    irssi_output "Nick %9$ni%9 was removed from the watch list.";
+    Irssi::print "Nick %9$ni%9 was removed from the watch list.";
   }
 
 }
@@ -247,6 +344,10 @@ sub cmd_watch
 {
   my ($arg) = @_;
   my ($cmd, $nick) = split(/ /, $arg);
+
+  if (not defined $cmd) {
+    $cmd = "list";
+  }
 
   if ($cmd eq "help") {
     cmd_watch_help();
@@ -268,7 +369,7 @@ sub cmd_watch
 sub cmd_watch_load
 {
   my $file = Irssi::get_irssi_dir."/watch";
-  my $nick;
+  my @nick;
   my $leftovers;
   my $command;
 
@@ -279,7 +380,7 @@ sub cmd_watch_load
   while (<FILE>) {
 
     @nick = split;
-    $command .= "+@nick[0] ";
+    $command .= "+$nick[0] ";
     $leftovers = 1;
 
     if (length($command) > $maxlength) {
@@ -289,24 +390,23 @@ sub cmd_watch_load
     }
   }
 
-  if ($leftovers = 1) {
+  if ($leftovers == 1) {
     Irssi::active_win()->command($command);
   }
-  
+
   close FILE;
-  chop $ret;
 
 }
 
 sub cmd_watch_help 
 {
- irssi_output " Usage:";
- irssi_output "   /watch          : shows online/offline nicknames";
- irssi_output "   /watch update   : updates the server with your online nicknames";
- irssi_output "   /watch status   : shows the status of your watch list";
- irssi_output "   /watch add nick : adds the nick to your watch list";
- irssi_output "   /watch del nick : removes the nick from your watch list";
- irssi_output "   /watch help     : shows this help screen";
+ Irssi::print " Usage:";
+ Irssi::print "   /watch          : shows online/offline nicknames";
+ Irssi::print "   /watch update   : updates the server with your online nicknames";
+ Irssi::print "   /watch status   : shows the status of your watch list";
+ Irssi::print "   /watch add nick : adds the nick to your watch list";
+ Irssi::print "   /watch del nick : removes the nick from your watch list";
+ Irssi::print "   /watch help     : shows this help screen";
 }
 
 # Sends the WATCH l or WATCH s command
@@ -323,14 +423,14 @@ sub server_watch
 sub event_rpl_logon
 {
   my ($server, $data) = @_;
-  my ($me, $nick, $ident, $host) = split(/ /, $data);
+  my ($me, $nick, $user, $host, $logontime) = split(/ /, $data);
 
   # if the network is PTnet then we want to save the output for the 608
   # that comes.
-  if (is_ptnet()) {
-    $watchlist{$nick} = { 'ident' => $ident, 'host' => $host, 'origin' => '600' };
+  if (is_ptnet($server)) {
+    $watchlist{$nick} = {user => $user, host => $host, origin => '600'};
   } else {
-    irssi_output "%G$nick%K [%n$ident\@$host%K]%G %9logged on";
+    $server->print("", "$watch %g$nick%K [%n$user\@$host%K] %9logged on", MSGLEVEL_CRAP);
   }
 }
 
@@ -340,7 +440,7 @@ sub event_rpl_logoff
   my ($server, $data) = @_;
   my ($me, $nick) = split(/ /, $data);
 
-  irssi_output "%R$nick%n logged off";
+  $server->print("", "$watch %R$nick%n logged off", MSGLEVEL_CRAP);
 }
 
 # 602
@@ -348,7 +448,7 @@ sub event_rpl_watchoff {
   my ($server, $data) = @_;
   my ($me, $nick) = split(/ /, $data);
 
-  irssi_output "Nick %_$nick%n was removed from the watch list.";
+  $server->print("", "Nick %_$nick%n was removed from the watch list.", MSGLEVEL_CRAP);
 }
 
 # 603
@@ -357,20 +457,19 @@ sub event_rpl_watchstat {
   my ($me, $nick) = split(/ /, $data);
 
   my $msg = substr($data, index($data, ':') + 1);
-  irssi_output "%_$msg%n";
+  $server->print("", "$watch %_$msg%n", MSGLEVEL_CRAP);
 }
 
 # 604 
 sub event_rpl_nowon {
   my ($server, $data) = @_;
-  my ($me, $nick, $ident, $host) = split(/ /, $data);
- 
+  my ($me, $nick, $user, $host, $logontime) = split(/ /, $data);
   # if the network is PTnet then we want to save the output for the 608
   # that comes.
-  if (is_ptnet()) {
-    $watchlist{$nick} = { 'ident' => $ident, 'host' => $host, 'origin' => '604'};
+  if (is_ptnet($server)) {
+    $watchlist{$nick} = {user => $user, host => $host, origin => '604', logontime => $logontime};
   } else {
-    irssi_output "%G$nick%K [%n$ident\@$host%K]%G %9is online!";
+    $server->print("", "$watch %g$nick%K [%n$user\@$host%K] %9is online!", MSGLEVEL_CRAP)
   }
  
 }
@@ -380,7 +479,7 @@ sub event_rpl_nowoff {
   my ($server, $data) = @_;
   my ($me, $nick, $ident, $host) = split(/ /, $data);
 
-  irssi_output "%R$nick%n is offline!";
+  $server->print("", "$watch %R$nick%n is offline!", MSGLEVEL_CRAP);
 }
 
 # 606
@@ -389,50 +488,119 @@ sub event_rpl_watchlist {
   my ($me, $nick) = split(/ /, $data);
 
   my $msg = substr($data, index($data, ':') + 1);
-  irssi_output "%_Watching:%n $msg";
+  $server->print("", "$watch %_Watching:%n $msg", MSGLEVEL_CRAP);
 }
 
 # 607
 sub event_rpl_endofwatchlist {
+
+  sub by_logontime {
+    $a->{logontime} <=> $b->{logontime}
+  }
+
+  sub by_regtime {
+    $a->{regtime} <=> $b->{regtime}
+  }
+
+  sub by_nick {
+    $a->{nick} <=> $b->{nick}
+  }
+
   my ($server, $data) = @_;
-  
   my $msg = substr($data, index($data, ' ') + 1);
-  
-  if ($msg =~ /WATCH l/) {
-    irssi_output "End of %_watch list%n";
+  my $string = "";
+
+  # End of WATCH list. Sort list and format it to display in a table
+  if (($msg =~ /End of WATCH l/) and ($use_table == 1) and $#displaylist > 0 and is_ptnet($server)) {  
+
+    $use_table = 0;
+
+    # Calculate padding values
+    my $maxlen_nick = max map { length($_->{nick}) } @displaylist;
+    my $maxlen_logontimef = max map { length($_->{logontimef}) } @displaylist;
+    my $maxlen_regtimef = max map { length($_->{regtimef}) } @displaylist;
+    my $maxlen_mask = (max map { length($_->{user}) + length($_->{host}) } @displaylist) + 1;
+    my @sorted = sort by_logontime @displaylist;
+    foreach (@sorted) { 
+      my $nick = $_->{nick};
+      my $mask = "$_->{user}\@$_->{host}";
+      my $regtime = $_->{regtime};
+      my $logontime =  $_->{logontime};
+      my $regtimef = $_->{regtimef};
+      my $logontimef = $_->{logontimef};
+      my $color = "%g";
+
+      # lool PTnet is funny and returns a weird value for NickServ etc lelele
+      if ($regtime eq 301097) {
+        $color = "%G";
+        $regtimef = "services nickname";
+      } elsif ($regtime == 0) {
+        $color = "%R";
+        $regtimef = "not identified";
+      }
+
+      my $padded_nick = RPad($nick, $maxlen_nick);
+      my $padded_logontimef = RPad($logontimef, $maxlen_logontimef);
+      my $padded_regtimef = RPad($regtimef, $maxlen_regtimef);
+      my $padded_mask = RPad($mask, $maxlen_mask);
+      $string .= "$color$padded_nick %c|%n $padded_logontimef %c|%n $padded_regtimef %c|%n $padded_mask %c|%n\n";
+    }
+
+    my $box = draw_box("Watch", $string, "Watch", 4, $maxlen_nick, $maxlen_logontimef, $maxlen_regtimef, $maxlen_mask); 
+
+    #clear display list after use
+    @displaylist = ();
+
+    $server->print("", $box, MSGLEVEL_CRAP);
+    #$server->print("", "End of %_watch list%n", MSGLEVEL_CRAP);
+
+  } elsif ($msg =~ /End of WATCH l/) {
+    $server->print("", "End of %_watch list%n", MSGLEVEL_CRAP);
   } elsif ($msg =~ /End of WATCH s/) {
-    irssi_output "End of %_watch status%n";
+    $server->print("", "End of %_watch status%n", MSGLEVEL_CRAP);
   }
 }
 
 # 608
-# PTnet only
+# Always follows a 600 or 604 (in PTnet only)
 sub event_rpl_watchnickserv {
   my ($server, $data) = @_;
   my ($me, $nick, $regtime) = split(/ /, $data);
-  my $mask, $event_str;
 
-  $mask = "$watchlist{$nick}{'ident'}\@$watchlist{$nick}{'host'}";
-  if ($watchlist{$nick}{'origin'} == 600) {
-    $event_str = "logged on!"
-  } else {
-    $event_str = "is online"
-  }
-  
+  if ($use_table == 0) {
 
-  #$nick = LPad($key, 15);
-  # lool PTnet is funny and returns a weird value for NickServ etc lelele
-  if ($regtime eq 301097) {
-    #irssi_output "%G>> $nick %K$msg_lb%n$mask%K$msg_rb%n is online%n %K/%n %BServices Nickname";
-    irssi_output "%G$nick%n $msg_lb"."Services Nickname ($mask) Services Nickname)$msg_rb $event_str";
-  } elsif ($regtime > 0) {
-    $regtimef = strftime('%b %d %H:%M:%S %Y', localtime($regtime));
-    irssi_output "%G$nick%n $msg_lb"."since $regtimef ($mask)$msg_rb $event_str";
-  } elsif ($regtime == 0) {
-    #irssi_output "%G>> $nick %K$msg_lb%n$mask%K$msg_rb%n is online%n %K/%n %Rnot registered or identified%n";
-    irssi_output "%R$nick%n $msg_lb"."not registered or not identified ($mask)$msg_rb $event_str";
+    my $mask = "$watchlist{$nick}{user}\@$watchlist{$nick}{host}";
+    my $regtimef = strftime('%b %d %H:%M:%S %Y', localtime($regtime));
+    my $color = "%g";
+
+    # lool PTnet is funny and returns a weird value for NickServ etc lelele
+    if ($regtime eq 301097) {
+      $color = "%G";
+      $regtimef = "services nickname";
+    } elsif ($regtime == 0) {
+      $color = "%R";
+      $regtimef = "not identified";
+    }
+
+    if ($watchlist{$nick}{origin} == 600) {
+      $server->print("", "$watch $color$nick%n $msg_lb"."since $regtimef ($mask)$msg_rb logged on!", MSGLEVEL_CRAP);
+    } else {
+      $server->print("", "$watch $color$nick%n $msg_lb"."since $regtimef ($mask)$msg_rb is online!", MSGLEVEL_CRAP);
+    }
+
   } else {
-    irssi_output "%RError:%n unknown value for regtime in RAW_608";
+    if ($watchlist{$nick}{origin} == 604) {
+      push(@displaylist, {
+        nick => $nick,
+        user => $watchlist{$nick}{user},
+        host => $watchlist{$nick}{host},
+        logontime => $watchlist{$nick}{logontime}, 
+        logontimef => to_period($watchlist{$nick}{logontime}), 
+        regtime => $regtime,
+        regtimef => strftime('%b %d %H:%M:%S %Y', localtime($regtime))
+      });
+    }
+
   }
 }
 

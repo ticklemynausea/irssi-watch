@@ -469,7 +469,8 @@ sub event_rpl_nowon {
   if (is_ptnet($server)) {
     $watchlist{$nick} = {user => $user, host => $host, origin => '604', logontime => $logontime};
   } else {
-    $server->print("", "$watch %g$nick%K [%n$user\@$host%K] %9is online!", MSGLEVEL_CRAP)
+    my $mask = "$user"."@"."$host";
+    $server->print("", "$watch %g$nick%n $msg_lb$mask$msg_rb is online!", MSGLEVEL_CRAP);
   }
  
 }
